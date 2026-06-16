@@ -21,44 +21,26 @@ struct AdaptiveGlassModifier: ViewModifier {
     var isInteractive = false
 
     func body(content: Content) -> some View {
-        Group {
-            #if compiler(>=6.2)
-            if #available(iOS 26.0, *) {
-                content
-                    .glassEffect(
-                        glass,
-                        in: .rect(cornerRadius: cornerRadius)
-                    )
-            } else {
-                fallback(content)
-            }
-            #else
-            fallback(content)
-            #endif
-        }
-    }
-
-    #if compiler(>=6.2)
-    @available(iOS 26.0, *)
-    private var glass: Glass {
-        let base = tint.map { Glass.regular.tint($0) } ?? .regular
-        return isInteractive ? base.interactive() : base
-    }
-    #endif
-
-    private func fallback(_ content: Content) -> some View {
         content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(tintOverlay)
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                    .strokeBorder(.white.opacity(isInteractive ? 0.24 : 0.16), lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.18), radius: isInteractive ? 14 : 8, y: isInteractive ? 8 : 4)
     }
-}
 
-extension View {
-    func adaptiveGlass(cornerRadius: CGFloat = 22, tint: Color? = nil, isInteractive: Bool = false) -> some View {
-        modifier(AdaptiveGlassModifier(cornerRadius: cornerRadius, tint: tint, isInteractive: isInteractive))
+    @ViewBuilder
+    private var tintOverlay: some View {
+        if let tint {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(tint)
+                .blendMode(.plusLighter)
+        }
     }
 }
 
@@ -72,19 +54,13 @@ struct AdaptiveGlassGroup<Content: View>: View {
     }
 
     var body: some View {
-        Group {
-            #if compiler(>=6.2)
-            if #available(iOS 26.0, *) {
-                GlassEffectContainer(spacing: spacing) {
-                    content()
-                }
-            } else {
-                content()
-            }
-            #else
-            content()
-            #endif
-        }
+        content()
+    }
+}
+
+extension View {
+    func adaptiveGlass(cornerRadius: CGFloat = 22, tint: Color? = nil, isInteractive: Bool = false) -> some View {
+        modifier(AdaptiveGlassModifier(cornerRadius: cornerRadius, tint: tint, isInteractive: isInteractive))
     }
 }
 

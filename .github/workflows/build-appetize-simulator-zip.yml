@@ -15,7 +15,7 @@ jobs:
     env:
       PROJECT_PATH: ios/UnifiedDrive/UnifiedDrive.xcodeproj
       SCHEME: UnifiedDrive
-      CONFIGURATION: Release
+      CONFIGURATION: Debug
       DERIVED_DATA: build/AppetizeDerivedData
       EXPORT_PATH: build/appetize
       BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID || 'com.local.UnifiedDrive' }}
@@ -32,6 +32,7 @@ jobs:
       - name: Build iOS Simulator app
         run: |
           set -euo pipefail
+          rm -rf build/UnifiedDrive.xcresult
           xcodebuild \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -39,12 +40,22 @@ jobs:
             -sdk iphonesimulator \
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath build/UnifiedDrive.xcresult \
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            ONLY_ACTIVE_ARCH=NO \
+            ONLY_ACTIVE_ARCH=YES \
             build
+
+      - name: Print build diagnostics on failure
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          if [ -d build/UnifiedDrive.xcresult ]; then
+            xcrun xcresulttool get --legacy --path build/UnifiedDrive.xcresult --format json > build/xcresult.json || true
+            grep -n "\"message\"" build/xcresult.json | head -200 || true
+          fi
 
       - name: Package .app zip for Appetize
         run: |
