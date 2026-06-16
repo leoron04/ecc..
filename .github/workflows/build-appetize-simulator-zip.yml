@@ -2,6 +2,12 @@ name: Build UnifiedDrive Appetize Zip
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-appetize-simulator-zip.yml"
+      - "ios/UnifiedDrive/**"
 
 jobs:
   build:
