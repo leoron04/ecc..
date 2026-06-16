@@ -102,9 +102,7 @@ struct FileBrowserView: View {
         }
         .onChange(of: selectedPhoto) { newValue in
             Task {
-                let online = await viewModel.upload(photoItem: newValue)
-                selectedPhoto = nil
-                session.setOnline(online)
+                await upload(photoItem: newValue)
             }
         }
         .sheet(item: $viewModel.previewItem) { item in
@@ -386,6 +384,32 @@ struct FileBrowserView: View {
     private func refresh() async {
         let online = await viewModel.load()
         session.setOnline(online)
+    }
+
+    private func upload(photoItem: PhotosPickerItem?) async {
+        defer { selectedPhoto = nil }
+        guard let photoItem else { return }
+
+        do {
+            guard let data = try await photoItem.loadTransferable(type: Data.self) else {
+                throw UnifiedDriveError.invalidResponse
+            }
+
+            let contentType = photoItem.supportedContentTypes.first
+            let ext = contentType?.preferredFilenameExtension ?? "jpg"
+            let filename = "Foto-\(Self.photoTimestamp()).\(ext)"
+            let online = await viewModel.upload(data: data, named: filename)
+            session.setOnline(online)
+        } catch {
+            viewModel.errorMessage = error.localizedDescription
+            session.setOnline(false)
+        }
+    }
+
+    private static func photoTimestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
     }
 }
 

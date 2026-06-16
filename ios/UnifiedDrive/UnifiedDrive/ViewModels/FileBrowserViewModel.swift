@@ -1,5 +1,4 @@
 import Foundation
-import PhotosUI
 
 @MainActor
 final class FileBrowserViewModel: ObservableObject {
@@ -123,17 +122,8 @@ final class FileBrowserViewModel: ObservableObject {
         }
     }
 
-    func upload(photoItem: PhotosPickerItem?) async -> Bool {
-        guard let photoItem else { return false }
-
+    func upload(data: Data, named filename: String) async -> Bool {
         do {
-            guard let data = try await photoItem.loadTransferable(type: Data.self) else {
-                throw UnifiedDriveError.invalidResponse
-            }
-
-            let contentType = photoItem.supportedContentTypes.first
-            let ext = contentType?.preferredFilenameExtension ?? "jpg"
-            let filename = "Foto-\(Self.timestamp()).\(ext)"
             try await client.upload(data: data, named: filename, to: path)
             return await load()
         } catch {
@@ -181,11 +171,6 @@ final class FileBrowserViewModel: ObservableObject {
         return try cache.store(data: data, for: item)
     }
 
-    private static func timestamp() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return formatter.string(from: Date())
-    }
 }
 
 struct LocalFilePresentation: Identifiable, Equatable {
