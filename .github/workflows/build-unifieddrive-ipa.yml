@@ -1,0 +1,162 @@
+name: Build UnifiedDrive IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      signing_mode:
+        description: "unsigned for Sideloadly/AltStore resigning, signed for certificate/provisioning export"
+        required: true
+        default: "unsigned"
+        type: choice
+        options:
+          - unsigned
+          - signed
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      PROJECT_PATH: ios/UnifiedDrive/UnifiedDrive.xcodeproj
+      SCHEME: UnifiedDrive
+      CONFIGURATION: Release
+      DERIVED_DATA: build/DerivedData
+      ARCHIVE_PATH: build/UnifiedDrive.xcarchive
+      EXPORT_PATH: build/export
+      BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID || 'com.local.UnifiedDrive' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build unsigned device app
+        if: ${{ inputs.signing_mode == 'unsigned' }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED_DATA" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        if: ${{ inputs.signing_mode == 'unsigned' }}
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos" -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app produced"
+            exit 1
+          fi
+          rm -rf build/Payload "$EXPORT_PATH"
+          mkdir -p build/Payload "$EXPORT_PATH"
+          cp -R "$APP_PATH" build/Payload/
+          (cd build && zip -qry export/UnifiedDrive-unsigned.ipa Payload)
+
+      - name: Import signing assets
+        if: ${{ inputs.signing_mode == 'signed' }}
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$BUILD_CERTIFICATE_BASE64"
+          test -n "$P12_PASSWORD"
+          test -n "$BUILD_PROVISION_PROFILE_BASE64"
+          test -n "$KEYCHAIN_PASSWORD"
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          PP_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          export CERTIFICATE_PATH PP_PATH
+          python3 - <<'PY'
+          import base64
+          import os
+
+          with open(os.environ["CERTIFICATE_PATH"], "wb") as cert:
+              cert.write(base64.b64decode(os.environ["BUILD_CERTIFICATE_BASE64"]))
+
+          with open(os.environ["PP_PATH"], "wb") as profile:
+              profile.write(base64.b64decode(os.environ["BUILD_PROVISION_PROFILE_BASE64"]))
+          PY
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i "$PP_PATH")")
+          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+      - name: Archive signed app
+        if: ${{ inputs.signing_mode == 'signed' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_PROFILE_NAME: ${{ secrets.IOS_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_TEAM_ID"
+          test -n "$IOS_PROFILE_NAME"
+          xcodebuild archive \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_NAME"
+
+      - name: Export signed IPA
+        if: ${{ inputs.signing_mode == 'signed' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_PROFILE_NAME: ${{ secrets.IOS_PROFILE_NAME }}
+          IOS_EXPORT_METHOD: ${{ secrets.IOS_EXPORT_METHOD || 'development' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EXPORT_PATH"
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${IOS_EXPORT_METHOD}</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${IOS_PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist build/ExportOptions.plist
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnifiedDrive-${{ inputs.signing_mode }}-ipa
+          path: build/export/*.ipa
+          if-no-files-found: error

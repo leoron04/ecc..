@@ -1,0 +1,32 @@
+UnifiedDrive -> Appetize
+
+NON caricare questo repository zip direttamente su Appetize.
+
+Appetize vuole uno zip che contiene una build iOS Simulator .app.
+Questo repository contiene il progetto sorgente e il workflow GitHub Actions
+che genera quello zip corretto.
+
+Passi:
+
+1. Apri il repository su GitHub.
+2. Vai in Actions.
+3. Seleziona "Build UnifiedDrive Appetize Zip".
+4. Premi "Run workflow".
+5. A fine run, scarica l'artifact:
+
+   UnifiedDrive-Appetize-iOS-Simulator
+
+6. Dentro troverai:
+
+   UnifiedDrive-Appetize-iOS-Simulator.zip
+
+7. Quello e il file da caricare su Appetize.
+
+Opzionale:
+
+Se aggiungi nei repository secrets un APPETIZE_API_TOKEN valido, il workflow
+prova anche ad aggiornare direttamente questa app:
+
+https://appetize.io/app/standalone_vkslgigx6zyzqihozz7ugb6uhq
+
+Se l'upload diretto fallisce, il workflow continua comunque e salva l'artifact.

@@ -1,0 +1,73 @@
+name: Build UnifiedDrive Appetize Zip
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      PROJECT_PATH: ios/UnifiedDrive/UnifiedDrive.xcodeproj
+      SCHEME: UnifiedDrive
+      CONFIGURATION: Release
+      DERIVED_DATA: build/AppetizeDerivedData
+      EXPORT_PATH: build/appetize
+      BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID || 'com.local.UnifiedDrive' }}
+      APPETIZE_PUBLIC_KEY: ${{ secrets.APPETIZE_PUBLIC_KEY || 'vkslgigx6zyzqihozz7ugb6uhq' }}
+      APPETIZE_API_TOKEN: ${{ secrets.APPETIZE_API_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build iOS Simulator app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$DERIVED_DATA" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Package .app zip for Appetize
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphonesimulator" -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No simulator .app produced"
+            exit 1
+          fi
+
+          mkdir -p "$EXPORT_PATH"
+          PRODUCTS_DIR="$(dirname "$APP_PATH")"
+          APP_NAME="$(basename "$APP_PATH")"
+          (cd "$PRODUCTS_DIR" && zip -qry "$GITHUB_WORKSPACE/$EXPORT_PATH/UnifiedDrive-Appetize-iOS-Simulator.zip" "$APP_NAME")
+
+      - name: Upload build to existing Appetize app
+        if: ${{ env.APPETIZE_API_TOKEN != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl -fS \
+            -X POST "https://api.appetize.io/v1/apps/${APPETIZE_PUBLIC_KEY}" \
+            -H "X-API-KEY: ${APPETIZE_API_TOKEN}" \
+            -F "file=@${EXPORT_PATH}/UnifiedDrive-Appetize-iOS-Simulator.zip" \
+            -F "platform=ios"
+
+      - name: Upload Appetize zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnifiedDrive-Appetize-iOS-Simulator
+          path: build/appetize/UnifiedDrive-Appetize-iOS-Simulator.zip
+          if-no-files-found: error
